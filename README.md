@@ -2,9 +2,9 @@
 
 **An Adaptive Sequence-Layout Scheduler for Memory-Efficient Fine-Tuning**
 
-单卡训练调度器。模型仍是 PyTorch / HuggingFace，Orchestrator 只决定：**这一步怎么组数据、词表 loss 怎么算、用什么精度和优化器**。不写 CUDA kernel。
+单卡微调时，墙钟和显存主要卡在两件事：**这一步的序列怎么排**，以及 **lm_head 要不要一次铺开整张词表**。Orchestrator 管的就是这两件事。模型仍是 PyTorch / HuggingFace，不写 CUDA kernel。
 
-和 LLaMA-Factory 这类完整 SFT 工厂不同：那边管模板、数据集、DeepSpeed、多卡、LoRA 配方；这边把 packing、分块词表、精度、fused Adam、compile 做成可独立开关、可单独测量的调度项。packing 不划算时退回并排 batch，类似 AdaLoRA 的 try-off。
+它有用，是因为同一张卡、同一份权重，一步能多算 token、峰值 logits 更小。RTX 4080 16GB 上 Qwen3-VL-2B 测到 **3508 tok/s，相对普通一步一条的 2264 tok/s 为 1.55×**，步时几乎不变，显存峰值更低。LLaMA-Factory 把数据、模板、LoRA、多卡配成能跑的流水线；它默认的 packing / 整段交叉熵不会给出这个倍数——按 LF 常见写法把样本拼长、再算整段 logits，在同一套测量里会掉到 841 tok/s，比不 packing 更慢。
 
 ---
 
@@ -32,16 +32,20 @@ smart 相对 baseline：**吞吐 1.55×**，一步墙钟几乎相同，token 多
 
 ## 和 LLaMA-Factory 等框架的区别
 
+差别不在「功能多少」，在**一步训练花多少时间和显存**。LF 解决的是「这套 SFT 怎么配齐」；Orchestrator 解决的是「配齐之后，单卡每秒能过多少 token」。缺模板、缺 LoRA、缺 DeepSpeed 不等于没用不——2B–7B 全参、一张消费卡，瓶颈就是步吞吐和 logits 峰值，不是缺一个 WebUI。
+
 | | Orchestrator | LLaMA-Factory / 同类 SFT 工厂 |
 |---|---|---|
-| 角色 | 单卡**调度器**：组 batch、loss、精度、优化器 | 完整训练工厂：数据、模板、LoRA、DeepSpeed、多卡、UI |
-| Packing | 按长度分桶；`auto` 并排，`on` 只在桶内拼接并走 varlen flash；开训可试跑，慢就退回 batch | 通常拼接成长序列；padding 收益和注意力块长绑在一起，长短混在同一步会抬高 block 调度成本 |
-| 词表 | 分块交叉熵，反向按块重算 logits；可裁到中英文+符号 | 默认整段 lm_head + CE |
-| 精度 / 优化器 | FP8、fused Adam、`torch.compile` 探测后自动降级 | 跟 DeepSpeed / bitsandbytes / 配置模板走，不是按步可消融的独立开关 |
-| 测量 | Stage2 消融把 packing / FP8 / fused / 分块 loss 拆开，带利用率、显存、tok/s | 主路径是「一种配方训完」，消融要自己改配置重跑 |
-| 不负责 | 多卡、数据集清洗、对话模板库、RLHF | 这些是 LF 的主场 |
+| 要解决的问题 | 单卡一步的 token 吞吐和显存 | 把数据、模板、LoRA、DeepSpeed、多卡配成能训完的流水线 |
+| Packing | 长度分桶，长短不进同一步；`on` 只在桶内拼接并走 flash varlen；开训试跑，更慢就退回并排。实测：只 packing 不算分块 loss → 841 tok/s | 常见路径是拼成长序列或 pad 到 batch 最长。padding「省」在空隙上，注意力仍按最长块计费；没有 varlen 时稠密 mask 会把 sdpa 打回 math 核 |
+| 词表 / loss | 分块交叉熵，反向按块重算；可裁到中英文+符号。packing 必须和这一项一起开，否则拼长会被词表打穿 | 默认整段 `hidden @ vocab` 一次出齐 logits。词表越大、拼得越长，这一项越主导步时 |
+| 实测（同卡同权重） | smart：3508 tok/s，1.55× baseline，显存更低 | 同等「拼长 + 整段 CE」落在 packing 那一行：比 baseline 慢 |
+| 精度 / 优化器 | 探测后能 fused / FP8 / compile 再用，装不下或更慢就降级 | 跟 DeepSpeed、bitsandbytes、配置模板走，服务的是「这种配方能不能训」，不是「这一步 tok/s」 |
+| 不做 | 对话模板库、数据集清洗、多卡 ZeRO、RLHF | 这些是 LF 已经做好的 |
 
-一句话：要配好 SFT 流水线用 LLaMA-Factory；要在**同一份权重**上把 packing 和词表 loss 等开关拆开测、并按长度分布自动组步，用 Orchestrator。
+独立开关是为了量清楚哪一项真的快。有用的是量完之后留下的组合：**分桶 + varlen packing + 分块词表**，不是「比 LF 少几个菜单」。
+
+模板和多卡继续用 LF；单卡全参要把一步 token 做上去，用 Orchestrator 的组步和 loss。两者叠的是不同层，不是缩水版和完整版。
 
 ---
 
