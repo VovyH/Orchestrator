@@ -1,0 +1,25 @@
+# 把下面改成你本机的 HuggingFace 模型目录或 hub id。
+model_name_or_path: Qwen/Qwen3.5-0.8B
+dataset_path: ""
+device: cuda  # gpu / cuda 或 ppu
+precision: auto  # 卡支持 FP8 就用，否则 BF16
+fused_adam: true
+packing: auto  # 空隙小或块太长就退回 batch；开训前会试跑
+nopack_batch_size: 2
+pack_waste_min: 0.10
+pack_length_limit: 4096
+bucket_ratio: 1.25  # 长短超过这个倍数就分桶，不进同一步
+packing_probe_steps: 2
+max_seq_len: 4096
+target_tokens_per_step: 4096
+max_samples: 256
+compile_mlp: true
+compile_attention: true
+chunk_tokens: 2048
+restrict_vocab: false  # true 或命令行 --crop-vocab：只留中文、英文和符号
+checkpoint_every_n: 1
+max_steps: 5
+lr: 0.0001
+betas: [0.9, 0.95]
+seed: 42
+log_every: 1

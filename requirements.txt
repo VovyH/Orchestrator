@@ -1,0 +1,7 @@
+torch
+pyyaml
+# VLM Stage2 ablation (optional):
+# transformers
+# pillow
+# bitsandbytes
+# flash-attn
