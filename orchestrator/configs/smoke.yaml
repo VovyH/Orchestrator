@@ -1,0 +1,23 @@
+model_name_or_path: tiny
+device: cuda 
+max_seq_len: 64
+target_tokens_per_step: 128
+synthetic_samples: 40
+synthetic_min_len: 8
+synthetic_max_len: 48
+vocab_size: 64
+tiny_hidden: 32
+tiny_layers: 2
+tiny_heads: 4
+precision: bf16
+packing: auto
+packing_probe_steps: 0
+compile_mlp: false
+compile_attention: false
+chunk_tokens: 32
+checkpoint_every_n: 2
+max_steps: 4
+lr: 0.001
+betas: [0.9, 0.95]
+seed: 7
+log_every: 1

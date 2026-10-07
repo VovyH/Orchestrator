@@ -1,0 +1,9 @@
+torch
+pyyaml
+# 终端进度条（可选，fit() 没有它就退回逐行日志）：
+# tqdm
+# VLM Stage2 ablation (optional):
+# transformers
+# pillow
+# bitsandbytes
+# flash-attn
